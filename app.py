@@ -3,6 +3,22 @@ import google.generativeai as genai
 import json
 import random
 
+# --- UPDATED BUTTON LOGIC ---
+    if st.button("Generate Question 🎲"):
+        st.session_state.answer_submitted = False
+        
+        # 1. Run the generator
+        result = generate_question(selected_category)
+        
+        # 2. IF SUCCESSFUL: Save result and refresh
+        if result:
+            st.session_state.current_question = result
+            st.rerun()
+            
+        # 3. IF FAILED (result is None): 
+        #    Do NOT refresh. This forces the app to stay on the current page 
+        #    so the red st.error() box remains visible.
+
 # --- CONFIGURATION ---
 st.set_page_config(page_title="CFA Level 1 Drill", page_icon="♾️")
 
