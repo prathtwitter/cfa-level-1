@@ -47,12 +47,12 @@ except Exception as e:
     st.stop()
 
 # --- MODEL CONFIGURATION (FIXED) ---
-# We switched to 'gemini-pro' which is the standard stable model.
+# We switched to 'gemini-2.0-flash' which is the current stable workhorse model.
 generation_config = genai.types.GenerationConfig(
     temperature=1.0
 )
 try:
-    model = genai.GenerativeModel('gemini-pro', generation_config=generation_config)
+    model = genai.GenerativeModel('gemini-2.0-flash', generation_config=generation_config)
 except Exception as e:
     st.error(f"Model Error: {e}")
     st.stop()
