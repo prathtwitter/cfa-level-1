@@ -47,12 +47,12 @@ except Exception as e:
     st.stop()
 
 # --- MODEL CONFIGURATION (FIXED) ---
-# Using 'gemini-1.5-flash' - best free tier limits and reliable performance.
+# Using 'gemini-2.5-flash' - current stable model with good free tier limits.
 generation_config = genai.types.GenerationConfig(
     temperature=1.0
 )
 try:
-    model = genai.GenerativeModel('gemini-1.5-flash', generation_config=generation_config)
+    model = genai.GenerativeModel('gemini-2.5-flash', generation_config=generation_config)
 except Exception as e:
     st.error(f"Model Error: {e}")
     st.stop()
