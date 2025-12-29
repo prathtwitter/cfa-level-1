@@ -4,7 +4,7 @@ import json
 import random
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="CFA Level 1 Drill", page_icon=♾️")
+st.set_page_config(page_title="CFA Level 1 Drill", page_icon="📚")
 
 # --- AUTHENTICATION (PASSWORD CHECK) ---
 def check_password():
@@ -126,7 +126,7 @@ def generate_question(category):
             return None
 
 # --- UI LAYOUT ---
-st.title("♾️ CFA Level 1: Infinite Drill")
+st.title("📚 CFA Level 1: Infinite Drill")
 
 with st.sidebar:
     st.header("Setup")
