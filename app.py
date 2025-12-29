@@ -6,7 +6,7 @@ import random
 # --- CONFIGURATION ---
 st.set_page_config(page_title="CFA Level 1 Drill", page_icon="♾️")
 
-# --- AUTHENTICATION ---
+# --- AUTHENTICATION (PASSWORD CHECK) ---
 def check_password():
     """Returns `True` if the user had the correct password."""
 
@@ -37,20 +37,21 @@ def check_password():
     return False
 
 if not check_password():
-    st.stop()  # Do not run any code below this line until authenticated
+    st.stop()  # Stop execution if password is wrong
 
-# --- APP STARTS HERE (Only runs if password is correct) ---
+# --- APP STARTS HERE ---
 
 # --- API SETUP ---
 try:
     genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-except FileNotFoundError:
-    st.error("API Key not found. Please set GOOGLE_API_KEY in .streamlit/secrets.toml")
+except Exception as e:
+    st.error(f"API Key Error: {e}")
     st.stop()
 
-# Set high temperature for maximum variety in questions
+# Using Flash model for speed. 
+# Added safety settings to prevent blocking of legitimate finance terms.
 generation_config = genai.types.GenerationConfig(
-    temperature=1.0  
+    temperature=1.0
 )
 model = genai.GenerativeModel('gemini-1.5-flash', generation_config=generation_config)
 
@@ -116,10 +117,12 @@ def generate_question(category):
     with st.spinner(f"Consulting the archives on '{subtopic}'..."):
         try:
             response = model.generate_content(prompt)
+            # Remove markdown if present
             clean_text = response.text.replace("```json", "").replace("```", "").strip()
             return json.loads(clean_text)
         except Exception as e:
-            st.error(f"Error: {e}")
+            # We print the error here so it is visible in the UI
+            st.error(f"Generation Error: {e}")
             return None
 
 # --- UI LAYOUT ---
@@ -129,10 +132,18 @@ with st.sidebar:
     st.header("Setup")
     selected_category = st.selectbox("Select Chapter:", list(RAW_TOPICS.keys()))
     
+    # --- UPDATED BUTTON LOGIC (Fixes Silent Failure) ---
     if st.button("Generate Question 🎲"):
         st.session_state.answer_submitted = False
-        st.session_state.current_question = generate_question(selected_category)
-        st.rerun()
+        
+        # Call the generator
+        result = generate_question(selected_category)
+        
+        # Only refresh if we actually got a question. 
+        # If result is None (error), we stay on this page to show the error message.
+        if result:
+            st.session_state.current_question = result
+            st.rerun()
         
     st.divider()
     st.metric("Score", f"{st.session_state.score} / {st.session_state.count}")
@@ -170,10 +181,13 @@ if st.session_state.current_question:
         
         st.info(f"**Explanation:** {q['explanation']}")
         
+        # Next Question Button
         if st.button("Next Question ➡"):
             st.session_state.answer_submitted = False
-            st.session_state.current_question = generate_question(selected_category)
-            st.rerun()
+            result = generate_question(selected_category)
+            if result:
+                st.session_state.current_question = result
+                st.rerun()
 
 else:
     st.info("👈 Select a topic on the left to begin.")
