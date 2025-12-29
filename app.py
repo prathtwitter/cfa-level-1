@@ -33,7 +33,7 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- API SETUP (UNCHANGED) ---
+# --- API SETUP ---
 try:
     genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 except Exception as e:
@@ -68,19 +68,21 @@ if 'executor' not in st.session_state:
 if 'future_batch' not in st.session_state:
     st.session_state.future_batch = None
 if 'quiz_data' not in st.session_state:
-    st.session_state.quiz_data = []  # List of all generated questions
+    st.session_state.quiz_data = []  # List of questions
 if 'user_answers' not in st.session_state:
-    st.session_state.user_answers = {} # {question_index: selected_option}
-if 'quiz_start_time' not in st.session_state:
-    st.session_state.quiz_start_time = None
+    st.session_state.user_answers = {} 
+if 'start_time' not in st.session_state:
+    st.session_state.start_time = None
+if 'end_time' not in st.session_state:
+    st.session_state.end_time = None
 if 'current_page' not in st.session_state:
     st.session_state.current_page = 0
 if 'quiz_active' not in st.session_state:
     st.session_state.quiz_active = False
 if 'quiz_submitted' not in st.session_state:
     st.session_state.quiz_submitted = False
-if 'drill_mode' not in st.session_state:
-    st.session_state.drill_mode = True # True = Infinite Drill, False = Full Quiz
+if 'mode' not in st.session_state:
+    st.session_state.mode = "Drill" # "Drill" or "Mock"
 
 # --- LOGIC & GENERATION ---
 
@@ -91,11 +93,7 @@ def get_random_subtopic(category):
     return random.choice(subtopics)
 
 def generate_batch(category=None, count=10, mixed_mode=False):
-    """
-    Generates a batch of questions.
-    If mixed_mode is True, it ignores category and picks random categories for a full quiz feel.
-    """
-    # Prepare prompt details
+    """Generates a batch of questions."""
     if mixed_mode:
         selected_topics = random.choices(list(RAW_TOPICS.keys()), k=count)
         topic_str = f"A mix of CFA Level 1 topics: {', '.join(selected_topics[:3])} etc."
@@ -114,7 +112,7 @@ def generate_batch(category=None, count=10, mixed_mode=False):
     - Create vignette/scenario-based questions.
     - Require calculation or judgment (No simple definitions).
     - Randomize company names and numbers.
-    - IMPORTANT: If Mixed Mode, ensure variety across different chapters.
+    - IMPORTANT: Ensure exactly {count} questions.
     
     OUTPUT FORMAT: Return ONLY a raw JSON LIST of objects.
     [
@@ -124,7 +122,7 @@ def generate_batch(category=None, count=10, mixed_mode=False):
             "question": "Scenario text...",
             "options": ["A) ...", "B) ...", "C) ..."],
             "answer": "The correct option text (e.g. 'A) 10.5%')",
-            "explanation": "Detailed explanation."
+            "explanation": "Detailed explanation of why the answer is correct and others are wrong."
         }},
         ...
     ]
@@ -134,7 +132,7 @@ def generate_batch(category=None, count=10, mixed_mode=False):
         response = model.generate_content(prompt)
         clean_text = response.text.replace("```json", "").replace("```", "").strip()
         data = json.loads(clean_text)
-        # Ensure category is present for mixed batches
+        # Ensure category is present
         for q in data:
             if 'category' not in q:
                 q['category'] = category if category else "General"
@@ -143,38 +141,37 @@ def generate_batch(category=None, count=10, mixed_mode=False):
         st.error(f"Batch Gen Error: {e}")
         return []
 
-def start_background_fetch(is_mixed=False, category=None):
-    """Submits a job to the background executor."""
+def start_background_fetch(is_mixed=False):
+    """Used only for Mock Mode pagination."""
     if st.session_state.future_batch is None:
         st.session_state.future_batch = st.session_state.executor.submit(
-            generate_batch, category, 10, is_mixed
+            generate_batch, None, 10, is_mixed
         )
 
 def get_background_result():
-    """Retrieves result from background executor, blocking if necessary."""
     if st.session_state.future_batch:
         try:
             result = st.session_state.future_batch.result()
-            st.session_state.future_batch = None # Clear future after consuming
-            return result
-        except Exception as e:
-            st.error(f"Background Fetch Failed: {e}")
             st.session_state.future_batch = None
+            return result
+        except Exception:
             return []
     return []
 
-# --- HELPERS ---
+def format_duration(timedelta_obj):
+    total_seconds = int(timedelta_obj.total_seconds())
+    minutes = total_seconds // 60
+    seconds = total_seconds % 60
+    return f"{minutes}m {seconds}s"
 
-def format_time(seconds):
-    return str(timedelta(seconds=int(seconds)))
-
-def reset_quiz():
+def reset_session():
     st.session_state.quiz_data = []
     st.session_state.user_answers = {}
     st.session_state.current_page = 0
     st.session_state.quiz_active = True
     st.session_state.quiz_submitted = False
-    st.session_state.quiz_start_time = datetime.now()
+    st.session_state.start_time = datetime.now()
+    st.session_state.end_time = None
     st.session_state.future_batch = None
 
 # --- UI LAYOUT ---
@@ -182,196 +179,215 @@ st.title("📚 CFA Level 1: Master Suite")
 
 with st.sidebar:
     st.header("Mode Selection")
-    mode = st.radio("Choose Mode:", ["Infinite Drill", "Full Mock Quiz"], index=0 if st.session_state.drill_mode else 1)
     
-    if mode == "Infinite Drill":
-        st.session_state.drill_mode = True
+    # Mode Switcher
+    selected_mode = st.radio("Choose Mode:", ["Topic Drill (10 Qs)", "Full Mock Quiz (90 Qs)"])
+    
+    if selected_mode == "Topic Drill (10 Qs)":
+        st.session_state.mode = "Drill"
         selected_category = st.selectbox("Select Chapter:", list(RAW_TOPICS.keys()))
-        if st.button("Start New Drill Batch"):
-            reset_quiz()
-            with st.spinner("Generating first batch..."):
-                initial_batch = generate_batch(selected_category, 10, False)
-                st.session_state.quiz_data = initial_batch
-                # Start pre-fetching next batch immediately
-                start_background_fetch(is_mixed=False, category=selected_category)
+        
+        st.info("Generates 10 hard questions on the selected topic. Timed.")
+        
+        if st.button("Start 10-Question Drill ▶"):
+            reset_session()
+            with st.spinner("Generating drill questions..."):
+                # Drill mode: Generate all 10 at once, no background fetching needed
+                batch = generate_batch(selected_category, 10, False)
+                st.session_state.quiz_data = batch
             st.rerun()
 
     else:
-        st.session_state.drill_mode = False
+        st.session_state.mode = "Mock"
         st.info("90 Questions | 135 Minutes\nCovers all topics.")
-        if st.button("Start Full Quiz"):
-            reset_quiz()
+        
+        if st.button("Start Full Mock ▶"):
+            reset_session()
             with st.spinner("Preparing exam paper..."):
                 initial_batch = generate_batch(count=10, mixed_mode=True)
                 st.session_state.quiz_data = initial_batch
-                # Start pre-fetching next batch immediately
                 start_background_fetch(is_mixed=True)
             st.rerun()
 
-# --- MAIN LOGIC ---
+# --- MAIN CONTENT ---
 
 if not st.session_state.quiz_active:
-    st.info("👈 Select a mode and click Start to begin.")
+    st.info("👈 Select a mode and click 'Start' to begin.")
     st.stop()
 
-# --- TIMERS ---
-if st.session_state.quiz_start_time and not st.session_state.quiz_submitted:
-    elapsed = datetime.now() - st.session_state.quiz_start_time
-    elapsed_secs = elapsed.total_seconds()
+# --- TIMER LOGIC ---
+if st.session_state.start_time and not st.session_state.quiz_submitted:
+    elapsed = datetime.now() - st.session_state.start_time
     
-    limit_secs = 135 * 60 # 135 mins
-    remaining_secs = max(0, limit_secs - elapsed_secs)
-    
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Time Elapsed", format_time(elapsed_secs))
-    c2.metric("Time Remaining", format_time(remaining_secs), delta_color="inverse")
-    c3.metric("Progress", f"{len(st.session_state.user_answers)} / {90 if not st.session_state.drill_mode else '∞'}")
+    if st.session_state.mode == "Mock":
+        # Countdown Timer for Mock
+        limit_secs = 135 * 60 
+        remaining_secs = max(0, limit_secs - elapsed.total_seconds())
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Time Elapsed", str(timedelta(seconds=int(elapsed.total_seconds()))))
+        c2.metric("Time Remaining", str(timedelta(seconds=int(remaining_secs))), delta_color="inverse")
+        c3.metric("Questions", f"{len(st.session_state.quiz_data)} loaded")
+        
+        if remaining_secs <= 0:
+            st.session_state.end_time = datetime.now()
+            st.session_state.quiz_submitted = True
+            st.rerun()
+    else:
+        # Count-up Timer for Drill
+        st.metric("⏱ Time Elapsed", str(timedelta(seconds=int(elapsed.total_seconds()))))
 
-    if not st.session_state.drill_mode and remaining_secs <= 0:
-        st.warning("⏰ Time is up! Auto-submitting...")
-        st.session_state.quiz_submitted = True
-        st.rerun()
-
-# --- QUIZ DISPLAY OR ANALYSIS ---
-
+# --- SUBMITTED VIEW (RESULTS) ---
 if st.session_state.quiz_submitted:
-    # --- ANALYSIS PAGE ---
-    st.header("📊 Performance Analysis")
+    st.divider()
+    st.header("🏁 Results Summary")
     
+    # Calculate Stats
     questions = st.session_state.quiz_data
     answers = st.session_state.user_answers
-    
     score = 0
-    topic_stats = {} # {topic: {'correct': 0, 'total': 0}}
-    
-    # Calculate Scores
-    for idx, q in enumerate(questions):
-        user_ans = answers.get(idx, None)
-        is_correct = (user_ans == q['answer'])
-        if is_correct: 
+    for i, q in enumerate(questions):
+        if answers.get(i) == q['answer']:
             score += 1
             
-        topic = q.get('category', 'General')
-        if topic not in topic_stats: 
-            topic_stats[topic] = {'correct': 0, 'total': 0}
+    # Calculate Duration
+    if st.session_state.end_time and st.session_state.start_time:
+        duration = st.session_state.end_time - st.session_state.start_time
+        duration_str = format_duration(duration)
+    else:
+        duration_str = "N/A"
+
+    # Metrics Row
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Final Score", f"{score} / {len(questions)}")
+    m2.metric("Accuracy", f"{(score/len(questions))*100:.1f}%")
+    m3.metric("Time Taken", duration_str)
+    
+    st.divider()
+    st.subheader("📝 Detailed Review")
+    st.caption("Reviewing all questions, including correct answers.")
+
+    for i, q in enumerate(questions):
+        user_ans = answers.get(i, "No Answer Selected")
+        correct_ans = q['answer']
+        is_correct = (user_ans == correct_ans)
         
-        topic_stats[topic]['total'] += 1
-        if is_correct:
-            topic_stats[topic]['correct'] += 1
-
-    # Overall Score
-    percentage = (score / len(questions)) * 100 if questions else 0
-    st.metric("Total Score", f"{score} / {len(questions)}", f"{percentage:.1f}%")
-    
-    # Topic Breakdown
-    st.subheader("Topic Breakdown")
-    data = []
-    for topic, stats in topic_stats.items():
-        acc = (stats['correct'] / stats['total']) * 100
-        status = "Needs Revision 🔴" if acc < 70 else "Strong 🟢"
-        data.append([topic, stats['correct'], stats['total'], f"{acc:.1f}%", status])
-    
-    df = pd.DataFrame(data, columns=["Topic", "Correct", "Total", "Accuracy", "Status"])
-    st.dataframe(df, use_container_width=True)
-    
-    # Detailed Review
-    with st.expander("Review Incorrect Answers"):
-        for idx, q in enumerate(questions):
-            user_ans = answers.get(idx, "No Answer")
-            if user_ans != q['answer']:
-                st.markdown(f"**Q{idx+1}: {q['question']}**")
-                st.caption(f"Topic: {q.get('category')}")
-                st.error(f"Your Answer: {user_ans}")
-                st.success(f"Correct Answer: {q['answer']}")
-                st.info(f"Explanation: {q['explanation']}")
-                st.divider()
-
-    if st.button("Start New Session"):
+        # Color coding the header
+        header_color = "green" if is_correct else "red"
+        icon = "✅" if is_correct else "❌"
+        
+        with st.container():
+            st.markdown(f":{header_color}[**Q{i+1} {icon}:**] {q['question']}")
+            
+            c_left, c_right = st.columns([1, 1])
+            with c_left:
+                if is_correct:
+                    st.success(f"**Your Answer:** {user_ans}")
+                else:
+                    st.error(f"**Your Answer:** {user_ans}")
+            with c_right:
+                st.info(f"**Correct Answer:** {correct_ans}")
+            
+            # Always show explanation
+            st.markdown(f"**💡 Explanation:** {q['explanation']}")
+            st.divider()
+            
+    if st.button("Start New Drill 🔄"):
         st.session_state.quiz_active = False
         st.rerun()
 
+# --- ACTIVE QUIZ VIEW ---
 else:
-    # --- QUESTION PAGE RENDERER ---
-    
-    # Pagination Logic
-    questions_per_page = 10
-    start_idx = st.session_state.current_page * questions_per_page
-    end_idx = start_idx + questions_per_page
-    
-    # Check if we need to load more data for the CURRENT page (Edge case)
-    if len(st.session_state.quiz_data) < end_idx:
-        # If we are here, it means we ran out of questions. 
-        # In Drill mode, fetch immediately. In Quiz mode, cap at 90.
-        if not st.session_state.drill_mode and len(st.session_state.quiz_data) >= 90:
-             pass # Don't generate more than 90
-        else:
-             # Force fetch if future is missing
+    # --- DRILL MODE (Single Page, 10 Qs) ---
+    if st.session_state.mode == "Drill":
+        with st.form("drill_form"):
+            for i, q in enumerate(st.session_state.quiz_data):
+                st.markdown(f"**{i+1}. {q['question']}**")
+                
+                # Use key to auto-save to session_state on rerun, 
+                # but we need to manually map form output to st.session_state on submit
+                st.radio(
+                    "Select:", 
+                    q['options'], 
+                    key=f"q_drill_{i}", 
+                    index=None,
+                    label_visibility="collapsed"
+                )
+                st.divider()
+            
+            submitted = st.form_submit_button("Submit & Review 🏁")
+            if submitted:
+                # Harvest answers from keys
+                for i in range(len(st.session_state.quiz_data)):
+                    st.session_state.user_answers[i] = st.session_state.get(f"q_drill_{i}")
+                
+                st.session_state.end_time = datetime.now()
+                st.session_state.quiz_submitted = True
+                st.rerun()
+
+    # --- MOCK MODE (Paginated, 90 Qs) ---
+    else:
+        questions_per_page = 10
+        start_idx = st.session_state.current_page * questions_per_page
+        end_idx = start_idx + questions_per_page
+        
+        # Auto-fetch logic for mock
+        if len(st.session_state.quiz_data) < end_idx and len(st.session_state.quiz_data) < 90:
              if not st.session_state.future_batch:
-                 start_background_fetch(is_mixed=not st.session_state.drill_mode)
+                 start_background_fetch(is_mixed=True)
              new_batch = get_background_result()
              st.session_state.quiz_data.extend(new_batch)
-    
-    current_batch = st.session_state.quiz_data[start_idx:end_idx]
-    
-    with st.form(key=f"page_{st.session_state.current_page}"):
-        st.subheader(f"Page {st.session_state.current_page + 1}")
+             
+        current_batch = st.session_state.quiz_data[start_idx:end_idx]
         
-        for i, q in enumerate(current_batch):
-            abs_index = start_idx + i
-            st.markdown(f"**{abs_index + 1}. {q['question']}**")
+        with st.form(key=f"page_{st.session_state.current_page}"):
+            st.subheader(f"Page {st.session_state.current_page + 1}")
             
-            # Persist previous answer
-            existing_ans = st.session_state.user_answers.get(abs_index, None)
+            for i, q in enumerate(current_batch):
+                abs_index = start_idx + i
+                st.markdown(f"**{abs_index + 1}. {q['question']}**")
+                
+                existing = st.session_state.user_answers.get(abs_index, None)
+                st.radio(
+                    "Select Option:", 
+                    q['options'], 
+                    key=f"q_mock_{abs_index}",
+                    index=q['options'].index(existing) if existing in q['options'] else None,
+                    label_visibility="collapsed"
+                )
+                st.divider()
             
-            choice = st.radio(
-                "Select Option:", 
-                q['options'], 
-                key=f"q_{abs_index}", 
-                index=q['options'].index(existing_ans) if existing_ans in q['options'] else None,
-                label_visibility="collapsed"
-            )
-            # Save answer to state immediately on change isn't possible in form, 
-            # so we process on submit or via session state key binding logic (auto)
-            if choice:
-                st.session_state.user_answers[abs_index] = choice
+            c_prev, c_next = st.columns([1, 1])
+            with c_prev:
+                if st.session_state.current_page > 0:
+                    if st.form_submit_button("⬅ Previous"):
+                        # Save current page state
+                        for i in range(len(current_batch)):
+                            abs_index = start_idx + i
+                            st.session_state.user_answers[abs_index] = st.session_state.get(f"q_mock_{abs_index}")
+                        st.session_state.current_page -= 1
+                        st.rerun()
             
-            st.divider()
-        
-        # Navigation Buttons
-        c_prev, c_next = st.columns([1, 1])
-        
-        with c_prev:
-            if st.session_state.current_page > 0:
-                if st.form_submit_button("⬅ Previous"):
-                    st.session_state.current_page -= 1
-                    st.rerun()
-                    
-        with c_next:
-            # Logic for Next Button
-            is_last_page = False
-            if not st.session_state.drill_mode and end_idx >= 90:
-                is_last_page = True
-            
-            if is_last_page:
-                if st.form_submit_button("Submit Quiz 🏁"):
-                    st.session_state.quiz_submitted = True
-                    st.rerun()
-            else:
-                if st.form_submit_button("Next ➡"):
-                    # 1. Save answers is handled by radio keys
-                    # 2. Check/Consume Background Task
-                    new_questions = get_background_result()
-                    if new_questions:
-                        st.session_state.quiz_data.extend(new_questions)
-                    
-                    # 3. Trigger NEXT Background Task for Page+2
-                    # Only if we haven't reached 90 in quiz mode
-                    if st.session_state.drill_mode or len(st.session_state.quiz_data) < 90:
-                         start_background_fetch(
-                             is_mixed=not st.session_state.drill_mode,
-                             category=st.session_state.quiz_data[0].get('category') if st.session_state.drill_mode else None
-                         )
-                    
-                    # 4. Advance Page
-                    st.session_state.current_page += 1
-                    st.rerun()
+            with c_next:
+                if end_idx >= 90:
+                    if st.form_submit_button("Submit Mock Exam 🏁"):
+                         # Save final page
+                        for i in range(len(current_batch)):
+                            abs_index = start_idx + i
+                            st.session_state.user_answers[abs_index] = st.session_state.get(f"q_mock_{abs_index}")
+                        st.session_state.end_time = datetime.now()
+                        st.session_state.quiz_submitted = True
+                        st.rerun()
+                else:
+                    if st.form_submit_button("Next ➡"):
+                        # Save current page
+                        for i in range(len(current_batch)):
+                            abs_index = start_idx + i
+                            st.session_state.user_answers[abs_index] = st.session_state.get(f"q_mock_{abs_index}")
+                        
+                        # Background fetch trigger
+                        if len(st.session_state.quiz_data) < 90:
+                             start_background_fetch(is_mixed=True)
+                        
+                        st.session_state.current_page += 1
+                        st.rerun()
