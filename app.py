@@ -4,7 +4,7 @@ import json
 import random
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="CFA Level 1 Drill", page_icon="♾️")
+st.set_page_config(page_title="CFA Level 1 Drill", page_icon=♾️")
 
 # --- AUTHENTICATION (PASSWORD CHECK) ---
 def check_password():
@@ -47,12 +47,12 @@ except Exception as e:
     st.stop()
 
 # --- MODEL CONFIGURATION (FIXED) ---
-# We switched to 'gemini-2.0-flash' which is the current stable workhorse model.
+# Using 'gemini-1.5-flash' - best free tier limits and reliable performance.
 generation_config = genai.types.GenerationConfig(
     temperature=1.0
 )
 try:
-    model = genai.GenerativeModel('gemini-2.0-flash', generation_config=generation_config)
+    model = genai.GenerativeModel('gemini-1.5-flash', generation_config=generation_config)
 except Exception as e:
     st.error(f"Model Error: {e}")
     st.stop()
