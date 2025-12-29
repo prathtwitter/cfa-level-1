@@ -3,22 +3,6 @@ import google.generativeai as genai
 import json
 import random
 
-# --- UPDATED BUTTON LOGIC ---
-    if st.button("Generate Question 🎲"):
-        st.session_state.answer_submitted = False
-        
-        # 1. Run the generator
-        result = generate_question(selected_category)
-        
-        # 2. IF SUCCESSFUL: Save result and refresh
-        if result:
-            st.session_state.current_question = result
-            st.rerun()
-            
-        # 3. IF FAILED (result is None): 
-        #    Do NOT refresh. This forces the app to stay on the current page 
-        #    so the red st.error() box remains visible.
-
 # --- CONFIGURATION ---
 st.set_page_config(page_title="CFA Level 1 Drill", page_icon="♾️")
 
@@ -61,11 +45,10 @@ if not check_password():
 try:
     genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 except Exception as e:
-    st.error(f"API Key Error: {e}")
+    st.error(f"Configuration Error: {e}")
     st.stop()
 
 # Using Flash model for speed. 
-# Added safety settings to prevent blocking of legitimate finance terms.
 generation_config = genai.types.GenerationConfig(
     temperature=1.0
 )
