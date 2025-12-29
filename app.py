@@ -18,11 +18,9 @@ def check_password():
         else:
             st.session_state["password_correct"] = False
 
-    # Return True if the user has already validated the password
     if "password_correct" in st.session_state and st.session_state["password_correct"]:
         return True
 
-    # Show input for password
     st.title("🔒 CFA Prep Access")
     st.text_input(
         "Enter Pass Key:", 
@@ -37,7 +35,7 @@ def check_password():
     return False
 
 if not check_password():
-    st.stop()  # Stop execution if password is wrong
+    st.stop()
 
 # --- APP STARTS HERE ---
 
@@ -48,11 +46,16 @@ except Exception as e:
     st.error(f"Configuration Error: {e}")
     st.stop()
 
-# Using Flash model for speed. 
+# --- MODEL CONFIGURATION (FIXED) ---
+# We switched to 'gemini-pro' which is the standard stable model.
 generation_config = genai.types.GenerationConfig(
     temperature=1.0
 )
-model = genai.GenerativeModel('gemini-1.5-flash', generation_config=generation_config)
+try:
+    model = genai.GenerativeModel('gemini-pro', generation_config=generation_config)
+except Exception as e:
+    st.error(f"Model Error: {e}")
+    st.stop()
 
 # --- TOPIC DATA ---
 RAW_TOPICS = {
@@ -116,11 +119,9 @@ def generate_question(category):
     with st.spinner(f"Consulting the archives on '{subtopic}'..."):
         try:
             response = model.generate_content(prompt)
-            # Remove markdown if present
             clean_text = response.text.replace("```json", "").replace("```", "").strip()
             return json.loads(clean_text)
         except Exception as e:
-            # We print the error here so it is visible in the UI
             st.error(f"Generation Error: {e}")
             return None
 
@@ -131,19 +132,14 @@ with st.sidebar:
     st.header("Setup")
     selected_category = st.selectbox("Select Chapter:", list(RAW_TOPICS.keys()))
     
-    # --- UPDATED BUTTON LOGIC (Fixes Silent Failure) ---
     if st.button("Generate Question 🎲"):
         st.session_state.answer_submitted = False
-        
-        # Call the generator
         result = generate_question(selected_category)
         
-        # Only refresh if we actually got a question. 
-        # If result is None (error), we stay on this page to show the error message.
         if result:
             st.session_state.current_question = result
             st.rerun()
-        
+            
     st.divider()
     st.metric("Score", f"{st.session_state.score} / {st.session_state.count}")
 
@@ -180,7 +176,6 @@ if st.session_state.current_question:
         
         st.info(f"**Explanation:** {q['explanation']}")
         
-        # Next Question Button
         if st.button("Next Question ➡"):
             st.session_state.answer_submitted = False
             result = generate_question(selected_category)
