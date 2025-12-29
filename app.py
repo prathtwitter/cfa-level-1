@@ -6,6 +6,41 @@ import random
 # --- CONFIGURATION ---
 st.set_page_config(page_title="CFA Level 1 Drill", page_icon="♾️")
 
+# --- AUTHENTICATION ---
+def check_password():
+    """Returns `True` if the user had the correct password."""
+
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Don't store the password
+        else:
+            st.session_state["password_correct"] = False
+
+    # Return True if the user has already validated the password
+    if "password_correct" in st.session_state and st.session_state["password_correct"]:
+        return True
+
+    # Show input for password
+    st.title("🔒 CFA Prep Access")
+    st.text_input(
+        "Enter Pass Key:", 
+        type="password", 
+        on_change=password_entered, 
+        key="password"
+    )
+    
+    if "password_correct" in st.session_state and not st.session_state["password_correct"]:
+        st.error("😕 Incorrect pass key")
+
+    return False
+
+if not check_password():
+    st.stop()  # Do not run any code below this line until authenticated
+
+# --- APP STARTS HERE (Only runs if password is correct) ---
+
 # --- API SETUP ---
 try:
     genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
@@ -19,8 +54,7 @@ generation_config = genai.types.GenerationConfig(
 )
 model = genai.GenerativeModel('gemini-1.5-flash', generation_config=generation_config)
 
-# --- TOPIC DATA (Paste your exact strings here) ---
-# The app will automatically split these by commas to ensure rotation.
+# --- TOPIC DATA ---
 RAW_TOPICS = {
     "Quantitative Methods": "Rate of Return, Time Value of Money, Statistical Measures, Probability, Portfolio Mathematics, Simulation, Estimation & Inference, Hypothesis Testing, Parametric & Non-Parametric Tests, Simple Linear Regression, Big Data Techniques",
     "Economics": "Firm & Market Structure, Understanding Business Cycles, Fiscal Policy, Monetary Policy, Introduction to Geopolitics, International Trade, Capital Flows & Foreign Exchange Markets, Exchange Rate Calculations",
@@ -49,22 +83,15 @@ if 'last_subtopic' not in st.session_state:
 
 # --- GENERATOR LOGIC ---
 def get_random_subtopic(category):
-    # Split the long string into a list
     raw_text = RAW_TOPICS[category]
-    # Clean up the string (remove 'specifically:', split by comma)
     clean_text = raw_text.replace("specifically:", "").replace("specifically", "")
     subtopics = [x.strip() for x in clean_text.split(',')]
-    
-    # Pick one random subtopic
-    selected = random.choice(subtopics)
-    return selected
+    return random.choice(subtopics)
 
 def generate_question(category):
-    # 1. Python picks the specific micro-topic (Ensures coverage)
     subtopic = get_random_subtopic(category)
-    st.session_state.last_subtopic = subtopic # Save for display
+    st.session_state.last_subtopic = subtopic
     
-    # 2. We tell the AI to focus ONLY on that micro-topic
     prompt = f"""
     You are a Senior CFA Level 1 Exam Writer. 
     Generate a SINGLE medium-to-hard multiple-choice question for CFA Level 1.
@@ -114,9 +141,7 @@ with st.sidebar:
 if st.session_state.current_question:
     q = st.session_state.current_question
     
-    # Show her exactly which concept is being tested (Helpful for mental mapping)
     st.caption(f"Chapter: {selected_category}  •  Concept: {st.session_state.last_subtopic}")
-    
     st.subheader(q['question'])
     
     option = st.radio(
